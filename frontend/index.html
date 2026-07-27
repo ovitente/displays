@@ -136,15 +136,31 @@ body{background:#070809; color:var(--ink); font-family:var(--mono); font-size:0.
 .sw:not(.on) .txt.l{opacity:0}
 .sw:not(.on) .txt.r{color:var(--ink2)}
 
-/* inline mode selects (in each output row) */
-select.sel{font-family:var(--mono); font-size:0.75rem; color:var(--ink); background:var(--bg3); border:1px solid var(--line2);
-  padding:0.4375rem 1.625rem 0.4375rem 0.5625rem; border-radius:2px; cursor:pointer; appearance:none; -webkit-appearance:none; width:100%;
+/* inline mode pickers (in each output row)
+   The visible control is .dd-btn + .dd-menu, both plain DOM. The <select> is
+   kept, hidden and click-through, purely as the value holder the change
+   handler and the e2e suite drive: WebKitGTK draws a native <select> popup as
+   its own X11 window and places it from coordinates that are wrong under
+   XWayland on wlroots — the list lands far away from the field. A menu drawn
+   inside the page can't miss. */
+.dd{position:relative; width:100%}
+.dd select.sel{position:absolute; inset:0; width:100%; height:100%; opacity:0; pointer-events:none; border:0; padding:0}
+.dd-btn{font-family:var(--mono); font-size:0.75rem; color:var(--ink); background:var(--bg3); border:1px solid var(--line2);
+  padding:0.4375rem 1.625rem 0.4375rem 0.5625rem; border-radius:2px; cursor:pointer; width:100%; text-align:left;
   background-image:linear-gradient(45deg,transparent 50%,var(--ink3) 50%),linear-gradient(135deg,var(--ink3) 50%,transparent 50%);
   background-position:calc(100% - 0.8125rem) center,calc(100% - 0.5625rem) center; background-size:0.3125rem 0.3125rem,0.3125rem 0.3125rem; background-repeat:no-repeat}
-select.sel:hover{border-color:var(--ink3)}
-select.sel:focus{outline:none; border-color:var(--accent)}
-select.sel:disabled{cursor:default; color:var(--ink3); opacity:.5}
-select.sel option{background:#1c1f22; color:var(--ink)}
+.dd-btn:hover{border-color:var(--ink3)}
+.dd-btn:focus{outline:none; border-color:var(--accent)}
+.dd.open .dd-btn{border-color:var(--accent)}
+.dd.dis .dd-btn{cursor:default; color:var(--ink3); opacity:.5}
+/* Fixed, not absolute: .appbody scrolls, and an absolute menu would be clipped
+   by it. Coordinates come from the button's rect (see openMenu). */
+.dd-menu{position:fixed; z-index:60; background:#1c1f22; border:1px solid var(--line2); border-radius:2px;
+  padding:0.1875rem 0; max-height:14rem; overflow-y:auto; box-shadow:0 10px 28px rgba(0,0,0,.6)}
+.dd-menu[hidden]{display:none}
+.dd-item{font-family:var(--mono); font-size:0.75rem; color:var(--ink); padding:0.375rem 0.75rem; cursor:pointer; white-space:nowrap}
+.dd-item:hover{background:var(--bg4)}
+.dd-item.on{color:var(--accent)}
 
 /* footer */
 .footer{display:flex; align-items:center; gap:0.625rem; padding:0.8125rem 1.125rem; border-top:1px solid var(--line);

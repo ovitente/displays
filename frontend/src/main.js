@@ -294,11 +294,27 @@ function onDrop(){
 }
 
 // ---------- LIST ----------
+// One option list feeds both the hidden <select> (the value holder driven by
+// the change handler and the e2e suite) and the in-page menu the user clicks.
 function optsRes(m){ const cur=m.w+'×'+m.h;
-  return m.modes.map(md=>{ const r=md.w+'×'+md.h; return `<option ${r===cur?'selected':''}>${r}</option>`; }).join(''); }
+  return m.modes.map(md=>{ const r=md.w+'×'+md.h; return {v:r, label:r, on:r===cur}; }); }
 function optsRate(m){ const md=m.modes.find(x=>x.w===m.w&&x.h===m.h)||m.modes[0]||{rates:[m.rate]};
-  return md.rates.map(r=>`<option value="${r}" ${r===m.rate?'selected':''}>${r} Hz</option>`).join(''); }
-function optsScale(m){ return SCALES.map(s=>`<option value="${s}" ${s===m.scale?'selected':''}>${s}×</option>`).join(''); }
+  return md.rates.map(r=>({v:String(r), label:r+' Hz', on:r===m.rate})); }
+function optsScale(m){ return SCALES.map(s=>({v:String(s), label:s+'×', on:s===m.scale})); }
+
+// A picker is: hidden <select> + button showing the current label + the menu.
+function picker(m, fld, opts, off){
+  const cur = opts.find(o=>o.on) || opts[0] || {v:'', label:'—'};
+  return `<div class="dd${off?' dis':''}" data-fld="${fld}" data-name="${m.name}">
+    <select class="sel" data-fld="${fld}" data-name="${m.name}" ${off}>${
+      opts.map(o=>`<option value="${o.v}" ${o.on?'selected':''}>${o.label}</option>`).join('')
+    }</select>
+    <button type="button" class="dd-btn" ${off} data-fld="${fld}" data-name="${m.name}">${cur.label}</button>
+    <div class="dd-menu" hidden>${
+      opts.map(o=>`<div class="dd-item${o.on?' on':''}" data-val="${o.v}">${o.label}</div>`).join('')
+    }</div>
+  </div>`;
+}
 
 function renderList(){
   if(loadError){
@@ -316,9 +332,9 @@ function renderList(){
       <span class="led ${m.active?'good':'off'}"></span>
       <div class="r-name">${m.name}${m.primary?'<span class="pill">primary</span>':''}<small>${m.make? m.make+' · ':''}${m.model}</small></div>
       <div class="r-pos">POS <b>${m.active? m.x+','+m.y : '—'}</b></div>
-      <select class="sel" data-fld="res"   data-name="${m.name}" ${off}>${optsRes(m)}</select>
-      <select class="sel" data-fld="rate"  data-name="${m.name}" ${off}>${optsRate(m)}</select>
-      <select class="sel" data-fld="scale" data-name="${m.name}" ${off}>${optsScale(m)}</select>
+      ${picker(m, 'res',   optsRes(m),   off)}
+      ${picker(m, 'rate',  optsRate(m),  off)}
+      ${picker(m, 'scale', optsScale(m), off)}
       <div class="sw${m.active?' on':''}" data-sw="${m.name}">
         <span class="txt l">on</span><span class="txt r">off</span><span class="knob"></span>
       </div>
@@ -368,12 +384,61 @@ function toggle(name){
 }
 
 list.addEventListener('click', e=>{
-  if(e.target.closest('select')) return;        // let dropdowns work untouched
+  if(e.target.closest('.dd')) return;           // pickers handle their own clicks
   const sw=e.target.closest('[data-sw]');
   if(sw){ toggle(sw.dataset.sw); return; }
   const row=e.target.closest('[data-name]');
   if(row){ selected=row.dataset.name; render(); }
 });
+
+// ---------- in-page dropdown menus ----------
+// Selecting writes to the hidden <select> and fires its change event, so the
+// menu and the e2e suite (page.select) both go through one code path.
+let openDD = null;
+function menuOpen(){ return !!openDD; }
+function closeMenu(){
+  if(!openDD) return;
+  openDD.classList.remove('open');
+  const menu = openDD.querySelector('.dd-menu');
+  if(menu) menu.hidden = true;
+  openDD = null;
+}
+function openMenu(dd){
+  closeMenu();
+  const btn = dd.querySelector('.dd-btn'), menu = dd.querySelector('.dd-menu');
+  menu.hidden = false;
+  dd.classList.add('open');
+  openDD = dd;
+  // Anchored to the field's own rect — the menu is fixed-positioned, so it is
+  // never clipped by the scrolling body.
+  const r = btn.getBoundingClientRect();
+  menu.style.minWidth = r.width + 'px';
+  menu.style.left = r.left + 'px';
+  menu.style.top = r.bottom + 'px';
+  const mh = menu.getBoundingClientRect().height;
+  if(r.bottom + mh > window.innerHeight) menu.style.top = Math.max(0, r.top - mh) + 'px';
+  const on = menu.querySelector('.dd-item.on');
+  if(on) on.scrollIntoView({block:'nearest'});
+}
+
+list.addEventListener('click', e=>{
+  const btn = e.target.closest('.dd-btn');
+  if(btn){
+    if(!btn.disabled) (btn.closest('.dd') === openDD) ? closeMenu() : openMenu(btn.closest('.dd'));
+    return;
+  }
+  const item = e.target.closest('.dd-item');
+  if(!item) return;
+  const sel = item.closest('.dd').querySelector('select.sel');
+  closeMenu();
+  if(sel && sel.value !== item.dataset.val){
+    sel.value = item.dataset.val;
+    sel.dispatchEvent(new Event('change', {bubbles:true}));
+  }
+});
+window.addEventListener('pointerdown', e=>{ if(openDD && !e.target.closest('.dd')) closeMenu(); });
+window.addEventListener('resize', closeMenu);
+document.querySelector('.appbody').addEventListener('scroll', closeMenu, true);
 
 document.querySelector('.footer').addEventListener('click', e=>{
   const b=e.target.closest('[data-act]'); if(!b) return;
@@ -471,6 +536,8 @@ function toast(html){ const t=$('#toast'); t.innerHTML=html; t.classList.add('sh
 // means "revert now" (the backend would revert on close anyway).
 // Ctrl+Q quits outright (the backend reverts an unconfirmed layout on close).
 window.addEventListener('keydown', e=>{
+  // An open picker eats Esc first — closing a menu must not close the app.
+  if(e.key==='Escape' && menuOpen()){ closeMenu(); return; }
   if(e.key==='Escape'){ confirmOpen() ? revertNow() : Quit(); return; }
   if((e.key==='q'||e.key==='Q') && e.ctrlKey && !e.altKey && !e.metaKey){ e.preventDefault(); Quit(); }
 });
