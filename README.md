@@ -133,6 +133,25 @@ at the store path from `nix build`.)
 
 ## Tests
 
+The package is distributed through the flake, so the gate is a flake check —
+nothing gets pushed (and therefore installed) without it:
+
+```sh
+task check        # == nix flake check
+```
+
+- `checks.package` — builds the package; `buildGoModule` runs `go test` in its
+  `checkPhase`, so a red backend test fails the build.
+- `checks.e2e` — the suite below in nixpkgs' chromium, sandboxed and hermetic
+  (`tests/e2e.nix`). Screenshots land in the derivation output.
+
+`task push` runs the same gate, then pushes `main`; `task nix` bumps the flake
+input in the NixOS configuration and rebuilds the host. What no check covers:
+the real GTK/WebKit window against a live Hyprland — that stays a manual
+`nix run` (and `visual.sh` below).
+
+The individual suites, for iterating locally:
+
 - `node tests/run.mjs` — headless e2e (puppeteer + system Chrome): stubs the Go
   backend, drives the real UI (toggle, mode change, Apply payload, drag with
   snap-on-drop adjacency, confirm/revert countdown, canvas containment),

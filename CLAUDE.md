@@ -12,8 +12,17 @@ GUI output manager for Hyprland (Wails: Go + WebKitGTK). Packaged as a Nix flake
   built binaries, copied artifacts, or any other workaround.
 - **No `result` symlinks.** Build with `nix build --no-link --print-out-paths`.
 
+## Release Flow
+
+`task check` (== `nix flake check`) → commit → `task push` (re-checks, pushes
+main) → `task nix` (bumps the `displays` flake input in dotfiles, rebuilds the
+host). The NixOS config pins a revision of `github:ovitente/displays`, so an
+unpushed commit is invisible to the rebuild — `task nix` refuses to run on a
+dirty tree or a HEAD that is not `origin/main`.
+
 ## Commands
 
+- Full gate: `task check` — package build + Go tests + frontend e2e in chromium
 - Build: `nix build --no-link --print-out-paths`
 - Run (flake): `nix run /home/det/x7/projects/displays`
 - Go tests: `nix-shell --run "go test ./..."`
