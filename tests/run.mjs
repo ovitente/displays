@@ -12,7 +12,7 @@
 
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
@@ -21,8 +21,20 @@ import { FIXTURE } from './fixtures.mjs';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DIST = resolve(__dir, '..', 'frontend', 'dist');
 const SHOTS = resolve(__dir, 'screenshots');
-const CHROME = process.env.CHROME ||
-  '/nix/store/a4150izcgbmvsdns1akgi17lspx6hhgq-google-chrome-148.0.7778.178/bin/google-chrome-stable';
+// Resolved from PATH, not hardcoded: a store path pinned here rots on the next
+// system rebuild. CHROME overrides it.
+function findChrome() {
+  if (process.env.CHROME) return process.env.CHROME;
+  const names = ['google-chrome-stable', 'google-chrome', 'chromium'];
+  for (const dir of (process.env.PATH || '').split(':')) {
+    for (const n of names) {
+      const p = join(dir, n);
+      if (existsSync(p)) return p;
+    }
+  }
+  return null;
+}
+const CHROME = findChrome();
 const PORT = 5599;
 
 const MIME = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
@@ -127,6 +139,8 @@ const text = (page, sel) => page.$eval(sel, el => el.textContent.trim()).catch((
 
 async function main() {
   if (!existsSync(DIST)) { console.error('dist/ missing — build first'); process.exit(2); }
+  if (!CHROME) { console.error('no chrome on PATH — set CHROME=/path/to/google-chrome-stable'); process.exit(2); }
+  mkdirSync(SHOTS, { recursive: true });
   const srv = await serve();
   const browser = await puppeteer.launch({
     executablePath: CHROME,
