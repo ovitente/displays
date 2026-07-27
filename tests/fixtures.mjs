@@ -8,3 +8,12 @@ export const FIXTURE = [
   { name:'eDP-1',    make:'',      model:'Built-in',w:2560, h:1600, rate:120, scale:1.33, x:700,  y:2160, active:true,  primary:false,
     modes:[{w:2560,h:1600,rates:[120,60]},{w:1920,h:1200,rates:[60]},{w:1600,h:1000,rates:[60]}] },
 ];
+
+// Laptop + a disabled external, exactly as `hyprctl monitors all` reports it:
+// a disabled output carries position 0,0 — i.e. right on top of the active one.
+export const DISABLED_AT_ORIGIN = [
+  { name:'eDP-1', make:'',     model:'Built-in', w:2560, h:1600, rate:120, scale:1.33, x:0, y:0, active:true,  primary:true,
+    modes:[{w:2560,h:1600,rates:[120,60]},{w:1920,h:1200,rates:[60]}] },
+  { name:'DP-1',  make:'Dell', model:'U2720Q',   w:3840, h:2160, rate:60,  scale:1.5,  x:0, y:0, active:false, primary:false,
+    modes:[{w:3840,h:2160,rates:[60,30]},{w:2560,h:1440,rates:[60]}] },
+];

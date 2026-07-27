@@ -16,7 +16,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { extname, join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import puppeteer from 'puppeteer-core';
-import { FIXTURE } from './fixtures.mjs';
+import { FIXTURE, DISABLED_AT_ORIGIN } from './fixtures.mjs';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const DIST = resolve(__dir, '..', 'frontend', 'dist');
@@ -117,6 +117,24 @@ async function assertContained(page, name) {
   check(name, bad === 0, `${bad} monitors overflow the canvas`);
 }
 
+// No two tiles may share canvas space — a disabled output drawn on top of an
+// active one claims a physical spot that is already taken.
+async function assertNoOverlap(page, name) {
+  const pairs = await page.evaluate(() => {
+    const box = el => { const r = el.getBoundingClientRect();
+      return { n: el.querySelector('.mn-name').textContent.trim(), l:r.left, t:r.top, r:r.right, b:r.bottom }; };
+    const rs = [...document.querySelectorAll('.canvas .mon')].map(box);
+    const bad = [];
+    for (let i = 0; i < rs.length; i++)
+      for (let j = i+1; j < rs.length; j++)
+        // 1px tolerance: flush tiles share a border pixel after rounding.
+        if (Math.min(rs[i].r, rs[j].r) - Math.max(rs[i].l, rs[j].l) > 1 &&
+            Math.min(rs[i].b, rs[j].b) - Math.max(rs[i].t, rs[j].t) > 1) bad.push(`${rs[i].n}/${rs[j].n}`);
+    return bad;
+  });
+  check(name, pairs.length === 0, pairs.join(', '));
+}
+
 // Drag the named monitor tile with the mouse (pointer events).
 async function dragMon(page, name, dx, dy) {
   const from = await page.evaluate(n => {
@@ -189,6 +207,7 @@ async function main() {
   check('HDMI-A-1 row marked disabled', hdmiDis);
   check('HDMI-A-1 switch is off', hdmiSwOff);
   check('footer now "2 of 3"', /2.*of.*3/.test(await text(page, '#foot-note') || ''), await text(page, '#foot-note'));
+  await assertNoOverlap(page, 'disabled tile does not cover an active one');
   await page.screenshot({ path: join(SHOTS, '02-toggle-off.png') });
 
   // ---- 3. change eDP-1 resolution ----
@@ -286,6 +305,8 @@ async function main() {
   const dpLast = calls4.length ? calls4[calls4.length - 1].find(m => m.name === 'DP-1') : null;
   check('single active monitor pinned to 0,0', dpLast && dpLast.x === 0 && dpLast.y === 0,
     JSON.stringify(dpLast && {x:dpLast.x, y:dpLast.y}));
+  await assertNoOverlap(page, 'two disabled tiles clear of the single active one');
+  await page.screenshot({ path: join(SHOTS, '06-two-disabled.png') });
 
   // ---- 10. Esc: with dialog open = revert; without = quit ----
   const revBefore = await page.evaluate(() => window.__calls.revert);
@@ -298,7 +319,30 @@ async function main() {
   await new Promise(r => setTimeout(r, 100));
   check('Esc without dialog → Quit', await page.evaluate(() => window.__calls.quit));
 
-  // ---- 11. no console errors / no broken assets ----
+  // ---- 11. load state where the disabled output sits at the origin ----
+  // Hyprland reports a disabled output at 0,0, so it arrives stacked on top of
+  // whatever owns the origin — the UI must unstack it before the first paint.
+  const page2 = await browser.newPage();
+  await page2.setViewport({ width: 980, height: 760 });
+  page2.on('pageerror', e => consoleErrors.push(String(e)));
+  await page2.evaluateOnNewDocument(stubScript(DISABLED_AT_ORIGIN));
+  await page2.goto(`http://localhost:${PORT}/`, { waitUntil: 'networkidle0' });
+  await page2.waitForSelector('.row', { timeout: 5000 }).catch(() => {});
+  check('2 tiles for laptop + disabled external', (await page2.$$eval('.canvas .mon', e => e.length)) === 2);
+  await assertNoOverlap(page2, 'disabled-at-origin output does not cover the laptop');
+  await assertContained(page2, 'disabled-at-origin: tiles inside canvas');
+  await page2.screenshot({ path: join(SHOTS, '07-disabled-at-origin.png') });
+  // Re-enabling pulls it back into the cluster, still gap-free.
+  await page2.click('[data-sw="DP-1"]');
+  await new Promise(r => setTimeout(r, 200));
+  await page2.click('[data-act="apply"]');
+  await new Promise(r => setTimeout(r, 300));
+  const calls5 = await page2.evaluate(() => window.__calls.apply);
+  check('re-enabled output rejoins a contiguous layout', calls5.length === 1 && contiguous(calls5[0]),
+    JSON.stringify(calls5[0] && calls5[0].filter(m => m.active).map(m => ({n:m.name,...L(m)}))));
+  await page2.close();
+
+  // ---- 12. no console errors / no broken assets ----
   check('no console/page errors', consoleErrors.length === 0, consoleErrors.join(' | '));
   check('no failed asset requests', failedUrls.length === 0, failedUrls.join(' | '));
 
