@@ -38,14 +38,27 @@ function RevertSeconds(){
   return b.RevertSeconds();
 }
 
-// The whole layout is authored in CSS pixels and XWayland reports DPR 1, so the
-// UI would render at physical 1:1. Zooming the root scales every element at
-// once; the backend decides the factor (DISPLAYS_SCALING).
+// The stylesheet is written in rem off a 16px root, so resizing the root scales
+// the whole UI. This is a real layout at a larger size — unlike a CSS zoom or a
+// transform, text stays crisply rendered and native <select> popups stay
+// anchored to their field. The backend decides the factor (DISPLAYS_SCALING).
+const ROOT_PX = 16;
+let UI = 1;                    // current root size / ROOT_PX
 async function applyScaling(){
   try{
     const z = await Scaling();
-    if(z && z !== 1) document.documentElement.style.zoom = z;
+    if(z && z !== 1) document.documentElement.style.fontSize = (ROOT_PX * z) + 'px';
   }catch{ /* leave the UI at 1:1 */ }
+  syncUnits();
+}
+
+// Canvas geometry is computed in screen px, so every constant tied to the
+// stylesheet has to follow the root size.
+function syncUnits(){
+  const px = parseFloat(getComputedStyle(document.documentElement).fontSize) || ROOT_PX;
+  UI = px / ROOT_PX;
+  GRID = 13 * UI;
+  SNAP = 11 * UI;
 }
 
 // ===== monitor data (populated from the backend at startup) =====
@@ -55,8 +68,8 @@ const SCALES = [1, 1.25, 1.33, 1.5, 1.75, 2];
 let selected = null;
 let loadError = null;
 let drag = null;
-const GRID = 13;          // screen px per grid cell (matches CSS)
-const SNAP = 11;          // edge-snap threshold, screen px
+let GRID = 13;            // screen px per grid cell (matches CSS, scaled by UI)
+let SNAP = 11;            // edge-snap threshold, screen px
 
 const $ = s => document.querySelector(s);
 const canvas = $('#canvas'), list = $('#list');
@@ -177,20 +190,33 @@ function normalizeActive(){
 }
 
 // ---------- ARRANGEMENT ----------
+// Draw a tile snapped to the background grid. Both EDGES are quantised (not the
+// width), so a tile never straddles a cell and two layout-adjacent outputs still
+// resolve to the exact same line — quantising sizes instead would open seams.
+// Clamped to the canvas so rounding can never push a tile outside it.
+function place(el, m){
+  const sw=lw(m)*view.scale, sh=lh(m)*view.scale;
+  const x0=toScreenX(m.x), y0=toScreenY(m.y);
+  const gx=Math.round(x0/GRID)*GRID, gy=Math.round(y0/GRID)*GRID;
+  const w=Math.max(GRID, Math.round((x0+sw)/GRID)*GRID - gx);
+  const h=Math.max(GRID, Math.round((y0+sh)/GRID)*GRID - gy);
+  el.style.left  =Math.max(0, Math.min(view.W-w, gx))+'px';
+  el.style.top   =Math.max(0, Math.min(view.H-h, gy))+'px';
+  el.style.width =w+'px';
+  el.style.height=h+'px';
+  return {w, h};
+}
+
 function renderCanvas(){
   canvas.querySelectorAll('.mon').forEach(e=>e.remove());
   MONITORS.forEach(m=>{
-    const sw=lw(m)*view.scale, sh=lh(m)*view.scale;
     const dragging = drag && drag.m===m;
     const el=document.createElement('div');
     el.className='mon'+(m.active?' on':' off')+(m.name===selected?' sel':'')
       +(dragging?' drag':'')+(dragging&&drag.snapped?' snap':'');
-    el.style.left =toScreenX(m.x)+'px';
-    el.style.top  =toScreenY(m.y)+'px';
-    el.style.width =sw+'px';
-    el.style.height=sh+'px';
+    const {w:sw, h:sh}=place(el, m);
     const sub = dragging ? `${m.x}, ${m.y}` : (m.active ? m.w+'×'+m.h : 'disabled');
-    const showSub = sh>=42 && sw>=66;
+    const showSub = sh>=42*UI && sw>=66*UI;
     el.innerHTML=`${m.primary?'<span class="pri">primary</span>':''}
       <span class="mn-name">${m.name}</span>
       ${showSub?`<span class="mn-res">${sub}</span>`:''}`;
@@ -200,21 +226,11 @@ function renderCanvas(){
 }
 
 // ---------- drag + snap ----------
-// Pointer coords → canvas CSS pixels. With root zoom applied, event coords and
-// getBoundingClientRect live in the zoomed scale while element geometry
-// (clientWidth, style.left) stays in CSS pixels; deriving the ratio from the
-// canvas itself keeps the drag exact whatever the zoom factor is.
-function ptr(e){
-  const r = canvas.getBoundingClientRect();
-  const k = r.width ? canvas.clientWidth / r.width : 1;
-  return { x:(e.clientX - r.left) * k, y:(e.clientY - r.top) * k };
-}
 function onGrab(e,m){
   if(e.button!==0) return;
   e.preventDefault();
   selected=m.name;
-  const p=ptr(e);
-  drag={ m, px:p.x, py:p.y, sx0:toScreenX(m.x), sy0:toScreenY(m.y),
+  drag={ m, px:e.clientX, py:e.clientY, sx0:toScreenX(m.x), sy0:toScreenY(m.y),
          lx0:m.x, ly0:m.y, snapped:false, moved:false };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onDrop);
@@ -228,9 +244,8 @@ function onMove(e){
   if(!drag) return;
   const m=drag.m;
   const sw=lw(m)*view.scale, sh=lh(m)*view.scale;
-  const p=ptr(e);
-  let sx=drag.sx0+(p.x-drag.px), sy=drag.sy0+(p.y-drag.py);
-  if(Math.abs(p.x-drag.px)>2||Math.abs(p.y-drag.py)>2) drag.moved=true;
+  let sx=drag.sx0+(e.clientX-drag.px), sy=drag.sy0+(e.clientY-drag.py);
+  if(Math.abs(e.clientX-drag.px)>2||Math.abs(e.clientY-drag.py)>2) drag.moved=true;
 
   // edge-snap against other active monitors (live hint; the drop solver is
   // what actually guarantees adjacency)
@@ -250,8 +265,7 @@ function onMove(e){
   m.x=toLayoutX(nx); m.y=toLayoutY(ny);
   const el=drag.el;
   if(el){
-    el.style.left=toScreenX(m.x)+'px';
-    el.style.top =toScreenY(m.y)+'px';
+    place(el, m);   // same grid quantisation as a full render
     el.classList.toggle('snap', drag.snapped);
     if(drag.sub) drag.sub.textContent=m.x+', '+m.y;
   }
@@ -472,4 +486,6 @@ async function loadRevertSecs(){
 }
 
 // Zoom first: it changes the canvas size the initial fitView() measures.
-Promise.all([applyScaling(), loadRevertSecs()]).then(reload);
+// Arrow, not a bare `.then(reload)`: Promise.all hands its result array to the
+// callback, and reload(msg) would toast it.
+Promise.all([applyScaling(), loadRevertSecs()]).then(() => reload());

@@ -93,9 +93,11 @@ Bound to `SUPER+SHIFT+D` in the Hyprland config. `Esc` and `Ctrl+Q` close the
 window; an unconfirmed layout is reverted first. SIGINT/SIGTERM do the same.
 The window is frameless; drag it by the title bar.
 
-UI size: the layout is in CSS pixels and XWayland always reports
-`devicePixelRatio = 1`, so it starts zoomed 1.25×. Override with
-`DISPLAYS_SCALING` (0.5–3, anything else falls back to the default):
+UI size: the stylesheet is written in `rem` off a 16px root, and XWayland always
+reports `devicePixelRatio = 1`, so the app starts with the root at 1.25× — a
+real layout at a larger size, which keeps text crisp and native `<select>`
+popups anchored (a CSS zoom does neither). Override with `DISPLAYS_SCALING`
+(0.5–3, anything else falls back to the default):
 
 ```sh
 DISPLAYS_SCALING=1.6 displays
