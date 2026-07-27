@@ -218,9 +218,35 @@ async function main() {
   const edpCanvasSub = await page.$eval('.canvas .mon.sel .mn-res', el => el.textContent.trim()).catch(() => '');
   check('eDP-1 canvas label reflects new resolution', edpCanvasSub.includes('1920×1200'), edpCanvasSub);
 
-  // ---- 4. change eDP-1 scale ----
-  await page.select('.row[data-name="eDP-1"] select[data-fld="scale"]', '2');
+  // ---- 4. change eDP-1 scale through the in-page picker ----
+  // Native <select> popups are drawn by WebKitGTK as separate X11 windows and
+  // land in the wrong place under XWayland, so the visible control is our own
+  // menu. Assert it opens anchored to its field and that picking applies.
+  await page.click('.row[data-name="eDP-1"] .dd[data-fld="scale"] .dd-btn');
+  await new Promise(r => setTimeout(r, 100));
+  const menuBox = await page.evaluate(() => {
+    const dd = document.querySelector('.row[data-name="eDP-1"] .dd[data-fld="scale"]');
+    const menu = dd.querySelector('.dd-menu'), btn = dd.querySelector('.dd-btn');
+    if (menu.hidden) return null;
+    const m = menu.getBoundingClientRect(), b = btn.getBoundingClientRect();
+    // Below the field, or flipped above it when there is no room below.
+    return { dx: Math.abs(m.left - b.left),
+             dy: Math.min(Math.abs(m.top - b.bottom), Math.abs(m.bottom - b.top)),
+             inViewport: m.left >= 0 && m.top >= 0 && m.right <= innerWidth && m.bottom <= innerHeight,
+             items: menu.querySelectorAll('.dd-item').length };
+  });
+  check('scale menu opens', menuBox !== null);
+  check('scale menu is anchored to its field', menuBox && menuBox.dx < 2 && menuBox.dy < 2,
+    menuBox && `dx=${menuBox.dx} dy=${menuBox.dy}`);
+  check('scale menu stays inside the window', menuBox && menuBox.inViewport);
+  check('scale menu lists every scale', menuBox && menuBox.items === 6, menuBox && String(menuBox.items));
+  await page.evaluate(() => [...document.querySelectorAll('.row[data-name="eDP-1"] .dd[data-fld="scale"] .dd-item')]
+    .find(i => i.dataset.val === '2').click());
   await new Promise(r => setTimeout(r, 150));
+  const scaleVal = await page.$eval('.row[data-name="eDP-1"] select[data-fld="scale"]', el => el.value);
+  check('picking from the menu writes the value', scaleVal === '2', scaleVal);
+  check('menu closes after picking',
+    await page.$eval('.row[data-name="eDP-1"] .dd[data-fld="scale"] .dd-menu', el => el.hidden));
   const toastScale = await text(page, '#toast');
   check('scale change toast shown', /scale 2/.test(toastScale || ''), toastScale);
 

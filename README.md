@@ -130,6 +130,11 @@ at the store path from `nix build`.)
 - **XWayland is forced** (`GDK_BACKEND=x11`, set in `main.go`). Under the native
   Wayland backend, WebKitGTK on wlroots reports `devicePixelRatio = 1/96`, which
   shrinks the entire UI ~96×. XWayland reports the correct DPR.
+- **No native `<select>` popups.** WebKitGTK renders them as separate X11
+  windows placed from coordinates that are wrong under XWayland on wlroots —
+  the list opens far from the field. The mode/rate/scale pickers draw their
+  menu inside the page; a hidden `<select>` is kept per picker as the value
+  holder that the change handler and the e2e suite drive.
 - **Lua Hyprland (0.55):** `hyprctl keyword` is rejected ("can't work with
   non-legacy parsers"). Live changes use `hyprctl eval 'hl.monitor({...})'`.
 
