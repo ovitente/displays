@@ -4,6 +4,8 @@ import (
 	"context"
 	"embed"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -24,6 +26,17 @@ func main() {
 
 	// Create an instance of the app structure
 	app := NewApp()
+
+	// A kill from the outside must not leave an unconfirmed layout live the way
+	// closing the window doesn't (OnBeforeClose below). SIGKILL can't be caught —
+	// there the auto-revert timer inside Hyprland's session is the only net.
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		app.revertIfPending()
+		os.Exit(0)
+	}()
 
 	// Create application with options
 	err := wails.Run(&options.App{
