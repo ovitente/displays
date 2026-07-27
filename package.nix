@@ -65,6 +65,10 @@ buildGoModule {
     chmod -R u+w frontend/dist
   '';
 
+  # The e2e check (tests/e2e.nix) serves the very bundle that ships in the
+  # binary, instead of rebuilding it with a second copy of npmDepsHash.
+  passthru = { inherit frontend; };
+
   meta = {
     description = "GUI output manager for Hyprland (Wails)";
     homepage = "https://github.com/ovitente/tools-wl-displays";
