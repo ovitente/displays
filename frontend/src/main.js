@@ -26,6 +26,27 @@ function RevertApply(){
   return b.RevertApply();
 }
 function Quit(){ if(window.runtime && window.runtime.Quit) window.runtime.Quit(); }
+function Scaling(){
+  const b = backend();
+  if(!b || !b.Scaling) return Promise.resolve(1);   // plain browser (tests): 1:1
+  return b.Scaling();
+}
+
+function RevertSeconds(){
+  const b = backend();
+  if(!b || !b.RevertSeconds) return Promise.resolve(revertSecs);
+  return b.RevertSeconds();
+}
+
+// The whole layout is authored in CSS pixels and XWayland reports DPR 1, so the
+// UI would render at physical 1:1. Zooming the root scales every element at
+// once; the backend decides the factor (DISPLAYS_SCALING).
+async function applyScaling(){
+  try{
+    const z = await Scaling();
+    if(z && z !== 1) document.documentElement.style.zoom = z;
+  }catch{ /* leave the UI at 1:1 */ }
+}
 
 // ===== monitor data (populated from the backend at startup) =====
 let MONITORS = [];
@@ -154,11 +175,21 @@ function renderCanvas(){
 }
 
 // ---------- drag + snap ----------
+// Pointer coords → canvas CSS pixels. With root zoom applied, event coords and
+// getBoundingClientRect live in the zoomed scale while element geometry
+// (clientWidth, style.left) stays in CSS pixels; deriving the ratio from the
+// canvas itself keeps the drag exact whatever the zoom factor is.
+function ptr(e){
+  const r = canvas.getBoundingClientRect();
+  const k = r.width ? canvas.clientWidth / r.width : 1;
+  return { x:(e.clientX - r.left) * k, y:(e.clientY - r.top) * k };
+}
 function onGrab(e,m){
   if(e.button!==0) return;
   e.preventDefault();
   selected=m.name;
-  drag={ m, px:e.clientX, py:e.clientY, sx0:toScreenX(m.x), sy0:toScreenY(m.y),
+  const p=ptr(e);
+  drag={ m, px:p.x, py:p.y, sx0:toScreenX(m.x), sy0:toScreenY(m.y),
          lx0:m.x, ly0:m.y, snapped:false, moved:false };
   window.addEventListener('pointermove', onMove);
   window.addEventListener('pointerup', onDrop);
@@ -172,8 +203,9 @@ function onMove(e){
   if(!drag) return;
   const m=drag.m;
   const sw=lw(m)*view.scale, sh=lh(m)*view.scale;
-  let sx=drag.sx0+(e.clientX-drag.px), sy=drag.sy0+(e.clientY-drag.py);
-  if(Math.abs(e.clientX-drag.px)>2||Math.abs(e.clientY-drag.py)>2) drag.moved=true;
+  const p=ptr(e);
+  let sx=drag.sx0+(p.x-drag.px), sy=drag.sy0+(p.y-drag.py);
+  if(Math.abs(p.x-drag.px)>2||Math.abs(p.y-drag.py)>2) drag.moved=true;
 
   // edge-snap against other active monitors (live hint; the drop solver is
   // what actually guarantees adjacency)
@@ -310,10 +342,12 @@ document.querySelector('.footer').addEventListener('click', e=>{
 // countdown here is cosmetic and calls RevertApply itself at zero (the call is
 // idempotent, so racing the backend timer is safe).
 let cdTimer=null, cdDeadline=0;
+// Mirrors revertDelay on the Go side; refreshed at startup (see loadRevertSecs).
+let revertSecs=10;
 const confirmOpen = () => !$('#confirm').hidden;
 
 function openConfirm(){
-  cdDeadline=Date.now()+(window.__testRevertSecs||10)*1000;
+  cdDeadline=Date.now()+(window.__testRevertSecs||revertSecs)*1000;
   $('#confirm').hidden=false;
   updateCountdown();
   cdTimer=setInterval(updateCountdown,250);
@@ -388,11 +422,21 @@ function toast(html){ const t=$('#toast'); t.innerHTML=html; t.classList.add('sh
 
 // Esc closes the (frameless) window — but with the confirm dialog open it
 // means "revert now" (the backend would revert on close anyway).
-window.addEventListener('keydown', e=>{ if(e.key==='Escape'){ confirmOpen() ? revertNow() : Quit(); } });
+// Ctrl+Q quits outright (the backend reverts an unconfirmed layout on close).
+window.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){ confirmOpen() ? revertNow() : Quit(); return; }
+  if((e.key==='q'||e.key==='Q') && e.ctrlKey && !e.altKey && !e.metaKey){ e.preventDefault(); Quit(); }
+});
 
 // Refit on any canvas size change (window resize or flex reflow). A
 // ResizeObserver delivers at most once per frame, so no extra throttling; the
 // list/meta don't depend on canvas size, so only the canvas re-renders.
 new ResizeObserver(()=>{ if(!drag){ fitView(); renderCanvas(); } }).observe(canvas);
 
-reload();
+async function loadRevertSecs(){
+  try{ const s = await RevertSeconds(); if(s > 0) revertSecs = s; }
+  catch{ /* keep the default */ }
+}
+
+// Zoom first: it changes the canvas size the initial fitView() measures.
+Promise.all([applyScaling(), loadRevertSecs()]).then(reload);

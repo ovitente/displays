@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App is the Wails application backend. Every exported method is bound into the
@@ -32,11 +34,41 @@ type App struct {
 
 // revertDelay is how long an applied-but-unconfirmed layout survives before
 // being reverted automatically. A var so tests can shrink it.
-var revertDelay = 10 * time.Second
+var revertDelay = 15 * time.Second
+
+// defaultScaling is the zoom factor the UI starts at. The layout is written in
+// CSS pixels and XWayland always reports devicePixelRatio 1 (see main.go), so
+// on a HiDPI output everything renders at physical 1:1 and reads tiny.
+const defaultScaling = 1.25
 
 func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) { a.ctx = ctx }
+
+// Scaling is the zoom factor the frontend applies to the document root.
+// DISPLAYS_SCALING overrides defaultScaling; out-of-range or unparsable values
+// fall back to it rather than leaving the UI unusable.
+func (a *App) Scaling() float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(os.Getenv("DISPLAYS_SCALING")), 64)
+	if err != nil || v < 0.5 || v > 3 {
+		return defaultScaling
+	}
+	return v
+}
+
+// RevertSeconds is the auto-revert window in whole seconds. The frontend
+// countdown reads it instead of keeping its own copy, which would silently
+// drift from revertDelay.
+func (a *App) RevertSeconds() int { return int(revertDelay.Seconds()) }
+
+// recenter pulls the window back onto a visible output. Toggling an output off
+// and on moves the frameless window to coordinates that may no longer exist,
+// leaving the confirm dialog off-screen — and an unconfirmed layout reverts.
+func (a *App) recenter() {
+	if a.ctx != nil {
+		wruntime.WindowCenter(a.ctx)
+	}
+}
 
 // ---------- types exchanged with the frontend (json tags match Displays.html) ----------
 
@@ -161,7 +193,10 @@ func (a *App) Apply(mons []Monitor) ([]Monitor, error) {
 
 	a.pending = mons
 	a.snapshot = snapshot
-	a.timer = time.AfterFunc(revertDelay, func() { _, _ = a.RevertApply() })
+	// Both the apply and the auto-revert re-plug outputs, so the window can end
+	// up parked off-screen — pull it back so the confirm dialog stays reachable.
+	a.recenter()
+	a.timer = time.AfterFunc(revertDelay, func() { _, _ = a.RevertApply(); a.recenter() })
 	return a.GetMonitors()
 }
 

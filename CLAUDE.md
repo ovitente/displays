@@ -15,10 +15,11 @@ GUI output manager for Hyprland (Wails: Go + WebKitGTK). Packaged as a Nix flake
 ## Commands
 
 - Build: `nix build --no-link --print-out-paths`
-- Run (flake): `nix run /home/det/dev/displays`
+- Run (flake): `nix run /home/det/x7/projects/displays`
 - Go tests: `nix-shell --run "go test ./..."`
 - Frontend build: `nix-shell --run "npm --prefix frontend run build"`
-- E2E: `node tests/run.mjs` (needs frontend/dist built first)
+- E2E: `node tests/run.mjs` (needs frontend/dist built first; Chrome is taken
+  from PATH, override with `CHROME=`)
 
 ## Notes
 

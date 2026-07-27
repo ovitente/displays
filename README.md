@@ -16,7 +16,7 @@ HTML/CSS/JS.
   layouts stay flush for scaled outputs too.
 - **Apply (live)** — for each output `hyprctl eval 'hl.monitor({...})'`.
   Takes effect instantly, no reload.
-- **Confirm or revert** — an applied layout stays *pending* for 10 seconds:
+- **Confirm or revert** — an applied layout stays *pending* for 15 seconds:
   a dialog offers Keep / Revert, and if it isn't confirmed (timeout, Esc, or
   closing the window) the previous configuration is restored automatically —
   a layout that blanks the displays can't survive.
@@ -29,14 +29,14 @@ The frontend re-reads state after Apply, so any value Hyprland adjusts
 
 ## Build
 
-Requires the toolchain from `shell.nix` (Go, Wails, WebKitGTK 4.1, Node, GTK3).
+Nix flake only — the build tags (`desktop`, `production`, `webkit2_41`) and the
+WebKitGTK 4.1 / GTK3 runtime are baked into the package.
 
 ```sh
-nix-shell
-wails build -tags webkit2_41    # nixpkgs ships webkit2gtk abi 4.1
+nix build --no-link --print-out-paths
 ```
 
-Binary: `build/bin/displays`.
+Binary: `<store-path>/bin/displays`.
 
 ## Install (Nix flake)
 
@@ -47,13 +47,13 @@ GTK/WebKit backend and yield a headless stub.
 Run without installing:
 
 ```sh
-nix run github:ovitente/tools-wl-displays
+nix run github:ovitente/displays
 ```
 
 Imperative install into your profile:
 
 ```sh
-nix profile install github:ovitente/tools-wl-displays
+nix profile install github:ovitente/displays
 ```
 
 Declarative (NixOS flake): add the input, expose it via an overlay, then install
@@ -62,7 +62,7 @@ Declarative (NixOS flake): add the input, expose it via an overlay, then install
 ```nix
 # flake.nix
 inputs.displays = {
-  url = "github:ovitente/tools-wl-displays";
+  url = "github:ovitente/displays";
   inputs.nixpkgs.follows = "nixpkgs";
 };
 
@@ -78,14 +78,28 @@ The binary lands on `PATH` as `displays`, so the Hyprland bind is just
 
 ## Dev
 
+Rebuild and run the packaged binary after a change:
+
 ```sh
-nix-shell --run "wails dev -tags webkit2_41"
+nix run .
 ```
+
+`wails dev` is deliberately not used: it bypasses the packaged build and the
+baked-in tags, so what it shows isn't what ships.
 
 ## Launch
 
-Bound to `SUPER+SHIFT+D` in the Hyprland config. `Esc` closes the window.
+Bound to `SUPER+SHIFT+D` in the Hyprland config. `Esc` and `Ctrl+Q` close the
+window; an unconfirmed layout is reverted first. SIGINT/SIGTERM do the same.
 The window is frameless; drag it by the title bar.
+
+UI size: the layout is in CSS pixels and XWayland always reports
+`devicePixelRatio = 1`, so it starts zoomed 1.25×. Override with
+`DISPLAYS_SCALING` (0.5–3, anything else falls back to the default):
+
+```sh
+DISPLAYS_SCALING=1.6 displays
+```
 
 ## Hyprland integration
 
@@ -107,7 +121,7 @@ bind = SUPER SHIFT, D, exec, displays
 ```
 
 (`displays` on `PATH` assumes the flake install above; otherwise point the bind
-at `build/bin/displays`.)
+at the store path from `nix build`.)
 
 ## Notes / gotchas
 
