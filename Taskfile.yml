@@ -1,0 +1,41 @@
+version: '3'
+
+# Installing displays means bumping the flake input the NixOS configuration
+# pins and rebuilding the system — the package is never built or copied by
+# hand (see CLAUDE.md). The input tracks origin/main, so anything not pushed
+# is invisible to the rebuild; the preconditions below refuse to run in that
+# state instead of silently installing an older revision.
+
+vars:
+  DOTFILES: '{{.DOTFILES | default "/home/det/x7/dist/dotfiles"}}'
+  HOST: '{{.HOST | default "serenity"}}'
+
+tasks:
+  check:
+    desc: Release gate — package builds, Go tests and frontend e2e pass
+    cmds:
+      # checks.package covers the build plus buildGoModule's checkPhase;
+      # checks.e2e drives the UI in headless chromium (see tests/e2e.nix).
+      - nix flake check
+
+  push:
+    desc: Verify this revision, then publish main to origin
+    preconditions:
+      - sh: git diff --quiet && git diff --cached --quiet
+        msg: "working tree is dirty — commit before pushing"
+      - sh: test "$(git rev-parse --abbrev-ref HEAD)" = main
+        msg: "not on main — merge the feature branch first (git merge --no-ff)"
+    cmds:
+      - task: check
+      - git push origin main
+
+  nix:
+    desc: Install this revision system-wide (update flake input in dotfiles, then rebuild)
+    preconditions:
+      - sh: git diff --quiet && git diff --cached --quiet
+        msg: "working tree is dirty — commit before installing"
+      - sh: git fetch --quiet origin main && test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+        msg: "HEAD is not origin/main — push (and merge) before installing"
+    cmds:
+      - nix flake update displays --flake {{.DOTFILES}}/nixos
+      - task -d {{.DOTFILES}} {{.HOST}}
