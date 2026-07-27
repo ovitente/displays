@@ -1,4 +1,4 @@
-# displays
+# DISPLAYS
 
 GUI output manager for Hyprland — enable/disable, arrange (drag with forced
 edge-to-edge adjacency), and set resolution / refresh rate / scale per monitor.
