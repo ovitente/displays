@@ -111,7 +111,9 @@ const clampN = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
 // snap uses) plus the desired coordinate slid into each neighbor's span; the
 // X×Y cross product lets a bridge output sit flush to different neighbors per
 // axis. Returns {x,y} or null when no candidate keeps the group connected.
-function resolvePlacement(w, h, desired, others){
+// With glue=false only the no-overlap rule applies (free-floating placement,
+// used for disabled outputs) — such a candidate always exists.
+function resolvePlacement(w, h, desired, others, glue=true){
   if(others.length===0) return {x:0, y:0};
   const xs=new Set([desired.x]), ys=new Set([desired.y]);
   others.forEach(o=>{
@@ -122,17 +124,40 @@ function resolvePlacement(w, h, desired, others){
   xs.forEach(x=>ys.forEach(y=>{
     const r={x,y,w,h};
     if(others.some(o=>overlaps(r,o))) return;
-    if(!others.some(o=>touches(r,o))) return;
-    if(!connected([r,...others])) return;
+    if(glue){
+      if(!others.some(o=>touches(r,o))) return;
+      if(!connected([r,...others])) return;
+    }
     const d=(x-desired.x)**2 + (y-desired.y)**2;
     if(!best || d<best.d) best={x,y,d};
   }));
   return best && {x:best.x, y:best.y};
 }
 
-// Re-establish adjacency after size/scale/active changes, moving as little as
-// possible: anchor stays put, the rest re-attach nearest-first.
-function normalizeLayout(){
+// Disabled outputs keep a tile on the canvas but stay out of the adjacency
+// solver, so nothing stops an active neighbor from being re-glued onto the same
+// spot — and Hyprland itself reports a disabled output at 0,0, right on top of
+// whatever sits at the origin. Two tiles in the same place read as two screens
+// occupying one physical spot, so push any overlapping disabled output to the
+// nearest free coordinate. Ones that already sit clear keep their position.
+function parkInactive(){
+  const placed=MONITORS.filter(m=>m.active).map(rect);
+  MONITORS.filter(m=>!m.active).forEach(m=>{
+    if(placed.some(o=>overlaps(rect(m),o))){
+      const p=resolvePlacement(lw(m), lh(m), {x:m.x, y:m.y}, placed, false);
+      if(p){ m.x=p.x; m.y=p.y; }
+    }
+    placed.push(rect(m));
+  });
+}
+
+// Re-establish adjacency after size/scale/active changes, then keep the
+// disabled outputs off the active cluster.
+function normalizeLayout(){ normalizeActive(); parkInactive(); }
+
+// Moves as little as possible: anchor stays put, the rest re-attach
+// nearest-first.
+function normalizeActive(){
   const act=MONITORS.filter(m=>m.active);
   if(act.length===0) return;
   if(act.length===1){ act[0].x=0; act[0].y=0; return; }
@@ -237,11 +262,17 @@ function onDrop(){
   const m=drag && drag.m, moved=drag && drag.moved;
   let stuck=false;
   if(moved && m && m.active){
-    // Commit to the nearest gap-free spot; inactive outputs stay free-floating.
+    // Commit to the nearest gap-free spot.
     const others=MONITORS.filter(o=>o!==m && o.active).map(rect);
     const p=resolvePlacement(lw(m), lh(m), {x:m.x, y:m.y}, others);
     if(p){ m.x=p.x; m.y=p.y; }
     else { m.x=drag.lx0; m.y=drag.ly0; stuck=true; }
+    parkInactive();                     // the new spot may cover a disabled tile
+  } else if(moved && m){
+    // A disabled output floats free — it only may not sit on another output.
+    const others=MONITORS.filter(o=>o!==m).map(rect);
+    const p=resolvePlacement(lw(m), lh(m), {x:m.x, y:m.y}, others, false);
+    if(p){ m.x=p.x; m.y=p.y; }
   }
   drag=null; fitView(); render();
   if(stuck) toast('Layout must stay contiguous');
@@ -376,7 +407,7 @@ async function revertNow(){
   try{
     MONITORS = (await RevertApply()) || [];
     if(!MONITORS.some(m=>m.name===selected)) selected = MONITORS[0] ? MONITORS[0].name : null;
-    fitView(); render();
+    parkInactive(); fitView(); render();
     toast('Reverted to previous configuration');
   }catch(err){
     toast(`<b>Revert failed</b> — ${err}`);
@@ -388,7 +419,7 @@ async function apply(){
     const res = await Apply(MONITORS);
     MONITORS = res || [];
     if(!MONITORS.some(m=>m.name===selected)) selected = MONITORS[0] ? MONITORS[0].name : null;
-    fitView(); render();
+    parkInactive(); fitView(); render();
     openConfirm();
   }catch(err){
     toast(`<b>Apply failed</b> — ${err}`);
@@ -406,7 +437,9 @@ async function reload(msg){
     MONITORS = (await GetMonitors()) || [];
     loadError = null;
     if(!MONITORS.some(m=>m.name===selected)) selected = MONITORS[0] ? MONITORS[0].name : null;
-    fitView(); render();
+    // Hyprland reports disabled outputs at 0,0 — unstack them before the first
+    // paint, otherwise they land on top of whatever owns the origin.
+    parkInactive(); fitView(); render();
     if(msg) toast(msg);
   }catch(err){
     loadError = String(err && err.message || err);
