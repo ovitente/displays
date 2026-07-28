@@ -24,7 +24,7 @@ dirty tree or a HEAD that is not `origin/main`.
 
 - Full gate: `task check` — package build + Go tests + frontend e2e in chromium
 - Build: `nix build --no-link --print-out-paths`
-- Run (flake): `nix run /home/det/x7/projects/displays`
+- Run (flake): `nix run .`
 - Go tests: `nix-shell --run "go test ./..."`
 - Frontend build: `nix-shell --run "npm --prefix frontend run build"`
 - E2E: `node tests/run.mjs` (needs frontend/dist built first; Chrome is taken
